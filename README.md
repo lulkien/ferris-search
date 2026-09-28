@@ -9,7 +9,7 @@ Claude Code's built-in web search works great in ideal network conditions — bu
 While looking for a workaround, I came across [open-webSearch](https://github.com/Aas-ee/open-webSearch), a Node.js MCP server that routes search queries through multiple engines. It solved the problem well. But I have a thing for Rust — and spinning up a Node.js runtime just to proxy a few HTTP requests felt heavier than it needed to be.
 
 So I rewrote the same idea in Rust:
-- **No Node.js runtime** — single self-contained binary, ~8 MB
+- **No Node.js runtime** — single self-contained binary, ~13 MB
 - **Lower latency** — Rust async I/O, concurrent fan-out across engines
 - **Smaller footprint** — negligible memory usage
 - **Proxy support** — HTTP/SOCKS5 proxy via env var, for networks that need it
@@ -34,8 +34,9 @@ With Claude Code as the AI layer and ferris-search as the search backbone, your 
 - **14 search engines** — Bing, DuckDuckGo, Brave, Baidu, CSDN, Juejin, Exa, Firecrawl, Zhihu, LinuxDo, Jina, Tavily, GitHub (repo search), GitHub Code (code search)
 - **7 MCP tools** — `web_search` + 6 article/content fetchers
 - **No API keys required** for most engines (Brave, Exa, Firecrawl, Jina, and Tavily require API keys)
-- **Single binary** — ~8 MB, no runtime dependencies
+- **Single binary** — ~13 MB, no runtime dependencies
 - **Proxy support** — HTTP/SOCKS5 proxy via env var
+- **Optional HTTP transport** — stdio by default, or a stateless Streamable HTTP listener (`MODE=http|both`)
 
 ## Quick Install
 
@@ -206,9 +207,35 @@ All configuration is done via environment variables.
 | `GITHUB_TOKEN` | — | Optional for `github` / `github_code` engines (raises rate limit from 60 to 5000 req/hr) |
 | `USE_PROXY` | `false` | Enable HTTP/SOCKS5 proxy |
 | `PROXY_URL` | `http://127.0.0.1:7890` | Proxy address |
-| `ENABLE_HTTP_SERVER` | `false` | Enable HTTP/SSE transport alongside stdio |
+| `ENABLE_HTTP_SERVER` | `false` | Run the Streamable HTTP transport alongside stdio (same as `MODE=both`) |
 | `MODE` | `stdio` | Transport mode: `stdio`, `http`, or `both` |
+| `HTTP_ADDR` | `127.0.0.1:8000` | Bind address for the HTTP transport; MCP endpoint is `/mcp` |
+| `HTTP_ALLOWED_HOSTS` | loopback only | Comma-separated `Host` values accepted by the HTTP transport |
+| `HTTP_ALLOWED_ORIGINS` | loopback only | Comma-separated browser origins allowed to call the HTTP transport |
 | `RUST_LOG` | `info` | Log level: `debug`, `info`, `warn`, `error` |
+
+### HTTP transport
+
+```bash
+MODE=http ferris-search                 # HTTP only, serves http://127.0.0.1:8000/mcp
+MODE=both ferris-search                 # stdio + HTTP in one process
+ENABLE_HTTP_SERVER=true ferris-search   # same as MODE=both
+```
+
+The endpoint speaks the stateless Streamable HTTP transport: no session is created,
+so each request carries its own protocol metadata. Modern clients
+(`2026-07-28`, i.e. `server/discover`) send `MCP-Protocol-Version` plus the
+`Mcp-Method` / `Mcp-Name` headers; clients on `2024-11-05` … `2025-11-25` are
+still served, statelessly, via `initialize`.
+
+`MODE=both` ties the two transports to one process lifetime: if either transport
+stops or fails to start, the process exits. Use `MODE=http` to run without a
+stdio client.
+
+The listener accepts loopback `Host` headers only (DNS-rebinding protection) and
+allows only loopback browser origins. Widen those with `HTTP_ALLOWED_HOSTS`
+(e.g. `box.internal`) and `HTTP_ALLOWED_ORIGINS` (e.g. `http://localhost:6274`)
+for LAN, reverse-proxy, or browser-hosted clients.
 
 ### Common configurations
 

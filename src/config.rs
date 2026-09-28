@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, sync::LazyLock};
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
@@ -87,6 +87,5 @@ impl AppConfig {
     }
 }
 
-lazy_static::lazy_static! {
-    pub static ref CONFIG: AppConfig = AppConfig::from_env();
-}
+/// Process-wide configuration, read from the environment on first access.
+pub static CONFIG: LazyLock<AppConfig> = LazyLock::new(AppConfig::from_env);
